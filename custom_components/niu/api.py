@@ -392,6 +392,37 @@ class NiuApi:
             json={"index": "0", "pagesize": 10, "sn": self.sn},
         )
 
+
+    def get_track_detail(self, track_id: str, date: str) -> dict[str, Any]:
+        """Retrieve GPS points for a completed NIU trip."""
+        if not self.sn:
+            raise NiuResponseError("NIU vehicle is not initialized")
+
+        headers = {
+            "Accept": "*/*",
+            "Content-Type": "application/json",
+            "X-No-Encrypt": "1",
+            "Accept-Language": self.language,
+            "User-Agent": (
+                "manager/5.12.2 (iPhone; iOS 27.0.1; Scale/3.00);"
+                "deviceName=iPhone;timezone=Europe/Amsterdam;"
+                "model=iPhone19,2;lang=nl-NL;ostype=iOS;"
+                "clientIdentifier=Overseas"
+            ),
+        }
+
+        return self._authenticated_request(
+            "POST",
+            "/v5/track/detail/v3",
+            headers=headers,
+            json={
+                "trackId": str(track_id),
+                "date": str(date),
+                "sn": self.sn,
+                "trackCategory": "1",
+            },
+        )
+
     def getDataBatA(self, id_field):
         try:
             return self.dataBat["data"]["batteries"]["compartmentA"][id_field]

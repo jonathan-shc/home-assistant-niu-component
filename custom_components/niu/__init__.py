@@ -1,6 +1,7 @@
 """NIU scooter integration."""
 from __future__ import annotations
 
+import asyncio
 import logging
 
 from homeassistant.config_entries import ConfigEntry
@@ -16,6 +17,7 @@ from .const import (
     DOMAIN,
 )
 from .coordinator import NiuDataUpdateCoordinator, required_sensor_groups
+from .trip_history import NiuTripHistory
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -49,7 +51,35 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         api,
         required_sensor_groups(sensors_selected),
     )
+
     await coordinator.async_config_entry_first_refresh()
+
+    trip_history = NiuTripHistory(hass, entry.entry_id)
+    await trip_history.async_load()
+
+    trip_history_lock = asyncio.Lock()
+
+    async def update_trip_history():
+        if trip_history_lock.locked():
+            return
+
+        async with trip_history_lock:
+            try:
+                await trip_history.async_process(api)
+            except Exception:
+                _LOGGER.exception("NIU trip history update failed")
+
+    remove_trip_listener = coordinator.async_add_listener(
+        lambda: hass.async_create_task(update_trip_history())
+    )
+    entry.async_on_unload(remove_trip_listener)
+
+    hass.data.setdefault(DOMAIN, {}).setdefault(
+        "_trip_histories", {}
+    )[entry.entry_id] = trip_history
+
+    await update_trip_history()
+
 
     entry_updates = {}
     if entry.unique_id is None:
