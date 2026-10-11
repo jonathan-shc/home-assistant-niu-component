@@ -72,6 +72,10 @@ has no options. Locally stored routes remain available during cloud outages.
 
 The coordinator now polls the track-list endpoint even for entries which only
 selected battery sensors, and processes at most one missing trip per polling
-cycle before updating entities. The existing initial-sync behavior is retained:
-only the newest ride is downloaded on first sync; older skip markers have no
-GPS route and are not exposed as saved trips. Existing retry backoff is retained.
+cycle before updating entities. The newest missing route is downloaded first, then historical rides from the
+50 most recent trips requested from NIU. Old initial-sync skip markers become
+eligible for download, so upgrading fills the history automatically. Already
+downloaded routes are preserved and never requested again. Existing retry
+backoff is retained. NIU may return fewer than 50 rides or no GPS data for an
+older ride; this does not remove previously stored routes. Retention keeps the
+500 newest rides by ride time, rather than download time.

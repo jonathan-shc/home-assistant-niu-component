@@ -389,7 +389,7 @@ class NiuApi:
             "POST",
             path,
             headers=headers,
-            json={"index": "0", "pagesize": 10, "sn": self.sn},
+            json={"index": "0", "pagesize": 50, "sn": self.sn},
         )
 
 

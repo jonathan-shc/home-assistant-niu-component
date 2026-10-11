@@ -67,7 +67,7 @@ class NiuTripHistory:
         )
 
     def get_pending_trip(self, track_list: dict) -> dict | None:
-        """Find the newest trip not yet downloaded."""
+        """Find the newest missing route, including legacy initial-sync markers."""
         if not isinstance(track_list, dict):
             return None
 
@@ -76,7 +76,7 @@ class NiuTripHistory:
         if not isinstance(trips, list):
             return None
 
-        for trip in reversed(trips):
+        for trip in trips:
             if not isinstance(trip, dict):
                 continue
 
@@ -85,7 +85,8 @@ class NiuTripHistory:
             if not track_id:
                 continue
 
-            if track_id in self.trips:
+            saved = self.trips.get(track_id)
+            if saved is not None and not saved.get("skipped_initial_sync"):
                 continue
 
             if time.time() < self.retry_after.get(track_id, 0):
@@ -161,17 +162,7 @@ class NiuTripHistory:
             if not isinstance(items, list) or not items:
                 return
 
-            # NIU returns newest trips first.
-            for old_trip in items[1:]:
-                if isinstance(old_trip, dict) and old_trip.get("trackId"):
-                    old_id = str(old_trip["trackId"])
-                    self.attempts.pop(old_id, None)
-                    self.retry_after.pop(old_id, None)
-                    self.trips[old_id] = {
-                        "track_id": old_id,
-                        "skipped_initial_sync": True,
-                    }
-
+            # Historical routes stay eligible; download one per poll, newest first.
             self.first_sync_completed = True
             await self.async_save()
 
@@ -208,7 +199,7 @@ class NiuTripHistory:
         if len(self.trips) > MAX_SAVED_TRIPS:
             oldest = sorted(
                 self.trips,
-                key=lambda key: self.trips[key].get("downloaded_at", ""),
+                key=lambda key: _trip_sort_key(self.trips[key]),
             )
             for old_id in oldest[:-MAX_SAVED_TRIPS]:
                 del self.trips[old_id]
