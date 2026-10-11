@@ -3,14 +3,13 @@
 from __future__ import annotations
 
 import importlib
-from pathlib import Path
 import sys
 import types
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 from tests.unit.ha_stubs import clear_niu_modules, install_homeassistant_stubs
-
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 
@@ -23,6 +22,7 @@ class FakeApi:
 
     def __init__(self) -> None:
         self.calls: list[str] = []
+        self.dataTrackInfo = {"data": []}
 
     def initialize(self) -> None:
         self.calls.append("initialize")
@@ -124,9 +124,9 @@ class ComponentTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(second_api.calls, ["initialize", "battery", "track"])
         self.assertEqual(
             hass.config_entries.forwarded,
-            [("sensor", "camera"), ("sensor", "camera")],
+            [("sensor", "select", "camera"), ("sensor", "select", "camera")],
         )
-        self.assertEqual(hass.config_entries.unloaded, [("sensor", "camera")])
+        self.assertEqual(hass.config_entries.unloaded, [("sensor", "select", "camera")])
         self.assertEqual(
             hass.config_entries.updated,
             [{"unique_id": "TEST-SN", "title": "NIU – MQi"}],
@@ -148,12 +148,15 @@ class ComponentTest(unittest.IsolatedAsyncioTestCase):
         )
         hass = FakeHass()
 
-        with patch.object(
-            self.component.NiuApi, "from_hass", return_value=FakeApi()
-        ):
+        with patch.object(self.component.NiuApi, "from_hass", return_value=FakeApi()):
             self.assertTrue(await self.component.async_setup_entry(hass, entry))
 
         self.assertEqual(hass.config_entries.updated, [])
+        self.assertEqual(hass.config_entries.forwarded, [("sensor", "select")])
+        self.assertEqual(
+            hass.data[self.const.DOMAIN][entry.entry_id].api.calls,
+            ["initialize", "battery", "track"],
+        )
 
 
 if __name__ == "__main__":

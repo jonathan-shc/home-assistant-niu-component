@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import asyncio
 import importlib
-from pathlib import Path
 import sys
 import types
 import unittest
+from pathlib import Path
 from unittest.mock import AsyncMock, Mock, patch
 
 from tests.unit.ha_stubs import clear_niu_modules, install_homeassistant_stubs
@@ -99,6 +99,10 @@ class EntityTest(unittest.IsolatedAsyncioTestCase):
         self.camera_module = importlib.import_module("custom_components.niu.camera")
         self.api = FakeApi()
         self.coordinator = FakeCoordinator(self.api)
+        history_module = importlib.import_module("custom_components.niu.trip_history")
+        self.coordinator.trip_history = history_module.NiuTripHistory(
+            types.SimpleNamespace(), "entry-1"
+        )
 
     def test_sensor_reads_cache_without_triggering_api_update(self) -> None:
         """Reading multiple sensors must not cause duplicate network requests."""
@@ -150,7 +154,9 @@ class EntityTest(unittest.IsolatedAsyncioTestCase):
 
         await self.sensor_module.async_setup_entry(hass, entry, async_add_entities)
 
-        entities = async_add_entities.call_args.args[0]
+        all_entities = async_add_entities.call_args.args[0]
+        self.assertEqual(len(all_entities), 6)
+        entities = all_entities[:2]
         self.assertEqual(
             [entity._attr_name for entity in entities],
             ["NIU Scooter MQi BatteryCharge", "NIU Scooter MQi BatteryGrade"],

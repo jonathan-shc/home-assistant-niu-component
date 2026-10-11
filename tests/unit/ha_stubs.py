@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import sys
 import types
 
@@ -68,9 +69,19 @@ class DataUpdateCoordinator:
         self.update_interval = update_interval
         self.data = None
         self.last_update_success = True
+        self.listeners = []
 
     async def async_config_entry_first_refresh(self) -> None:
         self.data = await self._async_update_data()
+        self.async_update_listeners()
+
+    def async_add_listener(self, listener):
+        self.listeners.append(listener)
+        return lambda: self.listeners.remove(listener)
+
+    def async_update_listeners(self):
+        for listener in tuple(self.listeners):
+            listener()
 
 
 class CoordinatorEntity:
@@ -132,6 +143,24 @@ def install_homeassistant_stubs() -> None:
     camera.Camera = Camera
     sensor = types.ModuleType("homeassistant.components.sensor")
     sensor.SensorEntity = SensorEntity
+    select = types.ModuleType("homeassistant.components.select")
+    select.SelectEntity = type("SelectEntity", (), {})
+    storage = types.ModuleType("homeassistant.helpers.storage")
+
+    class Store:
+        def __init__(self, hass, version, key):
+            self.hass = hass
+            self.key = key
+            if not hasattr(hass, "storage"):
+                hass.storage = {}
+
+        async def async_load(self):
+            return copy.deepcopy(self.hass.storage.get(self.key))
+
+        async def async_save(self, data):
+            self.hass.storage[self.key] = copy.deepcopy(data)
+
+    storage.Store = Store
 
     config_entries = types.ModuleType("homeassistant.config_entries")
     config_entries.ConfigFlow = ConfigFlow
@@ -170,6 +199,8 @@ def install_homeassistant_stubs() -> None:
         "homeassistant.components": components,
         "homeassistant.components.camera": camera,
         "homeassistant.components.sensor": sensor,
+        "homeassistant.components.select": select,
+        "homeassistant.helpers.storage": storage,
         "homeassistant.config_entries": config_entries,
         "homeassistant.core": core,
         "homeassistant.helpers": helpers,

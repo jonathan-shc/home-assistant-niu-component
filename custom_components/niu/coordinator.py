@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from datetime import timedelta
 import logging
+from datetime import timedelta
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
@@ -21,6 +21,7 @@ from .const import (
     SENSOR_TYPE_TRACK,
     SENSOR_TYPES,
 )
+from .trip_history import NiuTripHistory
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -33,9 +34,7 @@ MAX_RATE_LIMIT_BACKOFF = 3600
 def required_sensor_groups(sensors_selected: list[str]) -> set[str]:
     """Return the API data groups needed by the selected entities."""
     return {
-        SENSOR_TYPES[sensor][3]
-        for sensor in sensors_selected
-        if sensor in SENSOR_TYPES
+        SENSOR_TYPES[sensor][3] for sensor in sensors_selected if sensor in SENSOR_TYPES
     }
 
 
@@ -48,6 +47,7 @@ class NiuDataUpdateCoordinator(DataUpdateCoordinator[NiuApi]):
         config_entry: ConfigEntry,
         api: NiuApi,
         sensor_groups: set[str],
+        trip_history: NiuTripHistory | None = None,
     ) -> None:
         super().__init__(
             hass,
@@ -56,9 +56,11 @@ class NiuDataUpdateCoordinator(DataUpdateCoordinator[NiuApi]):
             name=DOMAIN,
             update_interval=POLL_INTERVAL,
         )
+        self.trip_history = trip_history
         self.api = api
         self.sensor_groups = frozenset(sensor_groups)
         self._initialized = False
+        self._skip_trip_history = False
 
     def _sync_update_data(self) -> NiuApi:
         """Initialize once, then update each required endpoint exactly once."""
@@ -80,14 +82,22 @@ class NiuDataUpdateCoordinator(DataUpdateCoordinator[NiuApi]):
             self.api.updateMoto()
         if SENSOR_TYPE_OVERALL in self.sensor_groups:
             self.api.updateMotoInfo()
+        self._skip_trip_history = False
         if SENSOR_TYPE_TRACK in self.sensor_groups:
             self.api.updateTrackInfo()
+        elif self.trip_history is not None:
+            # An added history endpoint must not break battery-only entries.
+            try:
+                self.api.updateTrackInfo()
+            except NiuApiError as err:
+                self._skip_trip_history = True
+                _LOGGER.warning("NIU trip list update failed: %s", err)
         return self.api
 
     async def _async_update_data(self) -> NiuApi:
         """Fetch NIU data without blocking Home Assistant's event loop."""
         try:
-            return await self.hass.async_add_executor_job(self._sync_update_data)
+            data = await self.hass.async_add_executor_job(self._sync_update_data)
         except NiuRateLimitError as err:
             retry_after = err.retry_after or DEFAULT_RATE_LIMIT_BACKOFF
             retry_after = max(
@@ -101,3 +111,11 @@ class NiuDataUpdateCoordinator(DataUpdateCoordinator[NiuApi]):
             raise UpdateFailed(f"NIU API update failed: {err}") from err
         except Exception as err:
             raise UpdateFailed("Unexpected error while updating NIU data") from err
+
+        if self.trip_history is not None and not self._skip_trip_history:
+            try:
+                await self.trip_history.async_process(data)
+            except Exception:
+                # GPS/history failures must not take existing battery entities offline.
+                _LOGGER.exception("NIU trip history update failed")
+        return data
