@@ -36,6 +36,7 @@ AVAILABLE_SENSORS = [
     "BatteryGradeA",
     "BatteryGradeB",
     "CurrentSpeed",
+    "RidingMode",
     "ScooterConnected",
     "IsCharging",
     "IsLocked",
@@ -144,6 +145,14 @@ SENSOR_TYPES = {
         SENSOR_TYPE_MOTO,
         "none",
         "mdi:battery-charging",
+    ],
+    "RidingMode": [
+        "riding_mode",
+        "",
+        "cycling_model",
+        SENSOR_TYPE_MOTO,
+        "none",
+        "mdi:motorbike",
     ],
     "IsLocked": ["is_locked", "", "lockStatus", SENSOR_TYPE_MOTO, "lock", "mdi:lock"],
     "TimeLeft": [
