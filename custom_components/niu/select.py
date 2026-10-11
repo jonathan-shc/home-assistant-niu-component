@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 from homeassistant.components.select import SelectEntity
+from homeassistant.const import EntityCategory
+
+from .controls import CHARGE_LIMIT_VALUES, NiuControlEntity
 
 from .const import DOMAIN
 from .entity import NiuTripEntity
@@ -11,7 +14,8 @@ from .entity import NiuTripEntity
 async def async_setup_entry(hass, entry, async_add_entities) -> None:
     """Add one selector per scooter without changing its existing config."""
     coordinator = hass.data[DOMAIN][entry.entry_id]
-    async_add_entities([NiuTripSelect(coordinator)])
+    controls = hass.data[DOMAIN]["_control_coordinators"][entry.entry_id]
+    async_add_entities([NiuTripSelect(coordinator), NiuChargingLimitSelect(controls)])
 
 
 class NiuTripSelect(NiuTripEntity, SelectEntity):
@@ -37,3 +41,29 @@ class NiuTripSelect(NiuTripEntity, SelectEntity):
         """Save the choice and immediately update local entities, without polling."""
         await self.history.async_select_trip(option)
         self.coordinator.async_update_listeners()
+
+
+class NiuChargingLimitSelect(NiuControlEntity, SelectEntity):
+    """Charge ceiling offered by the official NIU app."""
+
+    _attr_icon = "mdi:battery-charging-high"
+    _attr_entity_category = EntityCategory.CONFIG
+    _attr_options = [f"{value}%" for value in CHARGE_LIMIT_VALUES]
+
+    def __init__(self, coordinator):
+        super().__init__(
+            coordinator,
+            "charging_limit",
+            "Charging Limit",
+            "select",
+            "sup_charging_limit",
+        )
+
+    @property
+    def current_option(self):
+        value = str((self.coordinator.data or {}).get("charging_limit_value"))
+        return f"{value}%" if value in CHARGE_LIMIT_VALUES else None
+
+    async def async_select_option(self, option):
+        value = option.removesuffix("%")
+        await self.coordinator.async_set_setting("charging_limit_value", value)

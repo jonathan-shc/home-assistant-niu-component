@@ -18,6 +18,7 @@ from .const import (
 )
 from .coordinator import NiuDataUpdateCoordinator, required_sensor_groups
 from .trip_history import NiuTripHistory
+from .controls import NiuControlCoordinator
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -72,6 +73,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         hass.config_entries.async_update_entry(entry, **entry_updates)
 
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
+    controls = NiuControlCoordinator(hass, entry, api)
+    await controls.async_config_entry_first_refresh()
+    hass.data[DOMAIN].setdefault("_control_coordinators", {})[entry.entry_id] = controls
     await hass.config_entries.async_forward_entry_setups(
         entry, _get_platforms(sensors_selected)
     )
@@ -88,6 +92,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     )
     if unload_ok:
         hass.data[DOMAIN].pop(entry.entry_id, None)
+        hass.data[DOMAIN].get("_control_coordinators", {}).pop(entry.entry_id, None)
         hass.data[DOMAIN].get("_trip_histories", {}).pop(entry.entry_id, None)
 
     return unload_ok
@@ -96,5 +101,5 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 def _get_platforms(sensors_selected: list[str]) -> tuple[str, ...]:
     """Return an immutable, per-entry platform list."""
     if "LastTrackThumb" in sensors_selected:
-        return ("sensor", "select", "camera")
-    return ("sensor", "select")
+        return ("sensor", "select", "button", "switch", "number", "camera")
+    return ("sensor", "select", "button", "switch", "number")
