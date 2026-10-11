@@ -18,7 +18,8 @@ from .const import (
     SENSOR_TYPES,
 )
 from .coordinator import NiuDataUpdateCoordinator
-from .entity import NiuCoordinatorEntity
+from .entity import NiuCoordinatorEntity, NiuTripEntity
+from .trip_history import trip_history_attributes, trip_route_attributes
 
 
 async def async_setup_entry(hass, entry, async_add_entities) -> None:
@@ -44,6 +45,15 @@ async def async_setup_entry(hass, entry, async_add_entities) -> None:
             )
         )
 
+    entities.extend(
+        NiuTripSensor(coordinator, key, name)
+        for key, name in (
+            ("last_trip", "Last Trip"),
+            ("trip_history", "Trip History"),
+            ("trip_count", "Trip Count"),
+            ("selected_trip", "Selected Trip"),
+        )
+    )
     async_add_entities(entities)
 
 
@@ -118,3 +128,41 @@ class NiuSensor(NiuCoordinatorEntity, SensorEntity):
                 }
             )
         return attributes
+
+
+class NiuTripSensor(NiuTripEntity, SensorEntity):
+    """Expose a route, trip index or count from persistent local history."""
+
+    _unrecorded_attributes = frozenset({"route", "trips"})
+
+    def __init__(self, coordinator, key: str, name: str) -> None:
+        super().__init__(coordinator, key, name, "sensor")
+        self.key = key
+
+    @property
+    def native_value(self):
+        """Use short trip IDs for routes and counts for the history index."""
+        trips = self.history.saved_trips()
+        if self.key in ("trip_count", "trip_history"):
+            return len(trips)
+        trip = (
+            self.history.selected_trip
+            if self.key == "selected_trip"
+            else (trips[0] if trips else None)
+        )
+        return trip["track_id"] if trip else None
+
+    @property
+    def extra_state_attributes(self) -> dict | None:
+        """Keep full raw API details and GPS histories outside entity state."""
+        if self.key == "trip_count":
+            return None
+        if self.key == "trip_history":
+            return trip_history_attributes(self.history)
+        trips = self.history.saved_trips()
+        trip = (
+            self.history.selected_trip
+            if self.key == "selected_trip"
+            else (trips[0] if trips else None)
+        )
+        return trip_route_attributes(trip)

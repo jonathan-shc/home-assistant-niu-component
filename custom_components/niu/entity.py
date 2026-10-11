@@ -21,3 +21,20 @@ class NiuCoordinatorEntity(CoordinatorEntity[NiuDataUpdateCoordinator]):
             manufacturer="NIU",
             model="E-scooter",
         )
+
+
+class NiuTripEntity(NiuCoordinatorEntity):
+    """Base for local trip entities with the existing scooter naming scheme."""
+
+    def __init__(self, coordinator, key: str, name: str, platform: str) -> None:
+        super().__init__(coordinator)
+        api = coordinator.data
+        self.history = coordinator.trip_history
+        self._attr_unique_id = f"{platform}.niu_scooter_{api.sn}_{key}"
+        self._attr_name = f"NIU Scooter {api.sensor_prefix} {name}"
+        self._attr_icon = "mdi:map-marker-path"
+
+    @property
+    def available(self) -> bool:
+        """Stored routes remain readable when the NIU cloud is unavailable."""
+        return self.history.initialized
