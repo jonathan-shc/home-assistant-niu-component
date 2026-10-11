@@ -436,6 +436,38 @@ class NiuApi:
             },
         )
 
+    def get_settings(self) -> dict[str, Any]:
+        """Read settings separately from battery/status/history polling."""
+        payload = self.get_info("/v5/scooter/car_machine/align")
+        data = payload.get("data")
+        if not isinstance(data, dict):
+            raise NiuResponseError("NIU settings have an unexpected format")
+        return data
+
+    def set_setting(self, field: str, value: str) -> None:
+        """Send one partial settings update via the cloud transport."""
+        if field not in {
+            "low_power_mode_value",
+            "charging_limit_value",
+            "charge_power_set_value",
+        }:
+            raise ValueError("Unsupported NIU setting")
+        self._authenticated_request(
+            "POST",
+            "/v5/scooter/car_machine/align",
+            headers={**self._locale_headers(), "X-No-Encrypt": "1"},
+            json={"sn": self.sn, "db_cmd_type": "1", field: value},
+        )
+
+    def open_seat(self) -> None:
+        """Request seat release; acceptance does not prove physical opening."""
+        self._authenticated_request(
+            "POST",
+            "/v5/cmd/creat",
+            headers={**self._locale_headers(), "X-No-Encrypt": "1"},
+            json={"sn": self.sn, "type": "cushion_lock_on"},
+        )
+
     def getDataBatA(self, id_field):
         try:
             return self.dataBat["data"]["batteries"]["compartmentA"][id_field]

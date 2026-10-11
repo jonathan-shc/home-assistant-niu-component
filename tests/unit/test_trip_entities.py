@@ -63,7 +63,14 @@ class TripEntitiesTest(unittest.IsolatedAsyncioTestCase):
             self.hass, None, self.api, {"track"}, trip_history=self.history
         )
         self.coordinator.data = self.api
-        self.hass.data = {"niu": {"entry-1": self.coordinator}}
+        self.hass.data = {
+            "niu": {
+                "entry-1": self.coordinator,
+                "_control_coordinators": {
+                    "entry-1": types.SimpleNamespace(api=self.api)
+                },
+            }
+        }
 
     def sensor(self, key):
         return self.sensor_module.NiuTripSensor(self.coordinator, key, key)

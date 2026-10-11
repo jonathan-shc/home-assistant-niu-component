@@ -107,3 +107,35 @@ polling, without extra API calls. The numeric codes have not been mapped to
 E-Save, Wet, Dynamic, Sports or Master: verify them against your own scooter.
 A missing field is reported as unknown. This sensor reads cloud status; it does
 not send commands or represent individual handlebar button presses.
+
+## Cloud controls
+
+Existing entries gain four controls on the existing NIU device without changing
+sensor IDs, credentials or stored trip history:
+
+| Name | Entity | Behavior |
+| --- | --- | --- |
+| Open Seat | button | Sends the app's `cushion_lock_on` command to release the seat/storage compartment |
+| Auto Sleep | switch | Reads/writes `low_power_mode_value`; this is the Auto Sleep setting, not current sleep or low-battery E-Save status |
+| Charging Limit | select | Charge ceiling: 80%, 85%, 90%, 95% or 100% |
+| Charging Power | number | Whole watts within the scooter's reported `charge_power_range` |
+
+Settings use a separate coordinator with a 150-second poll interval. Settings
+failures do not interrupt existing battery/status sensors or GPS backfill.
+Unsupported settings are unavailable; a subsequent successful poll recovers
+availability. Charging Power remains unavailable when NIU omits valid limits
+(e.g. while unplugged). Its `reported_setting_w` attribute still exposes the
+reported value. No charger/model-specific minimum or maximum is guessed.
+
+Each settings write sends only the selected field plus `sn` and cloud transport
+`db_cmd_type: "1"` to `/v5/scooter/car_machine/align`, then reads provider settings
+back. Entities never assume the requested value was applied; cloud propagation
+may take until a later poll. API failures are reported by the action. No commands
+are sent during setup, polling or restart. Requests that time out are not retried.
+
+Open Seat sends JSON to `/v5/cmd/creat` with `type: "cushion_lock_on"` and the
+authentication token in the header, matching an observed official app request.
+It requests opening, rather than claiming the seat's physical state. The app
+also queries `/v5/motor/cmdstatus`; its response semantics have not yet been
+verified, so this integration does not treat a button press as proof of opening.
+Compatibility depends on the scooter, firmware and cloud connection.

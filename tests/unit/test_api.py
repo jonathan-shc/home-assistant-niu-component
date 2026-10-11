@@ -105,6 +105,52 @@ def data_response(value: str = "ok") -> FakeResponse:
 class NiuApiTest(unittest.TestCase):
     """Verify authentication recovery and robust HTTP handling."""
 
+    def test_seat_command_uses_observed_json_and_auth_header(self):
+        api = api_module.NiuApi("test", "secret", 0)
+        api.token = "access"
+        api.sn = "SYNTHETIC-SN"
+        with patch.object(
+            api_module.requests, "post", return_value=data_response()
+        ) as post:
+            api.open_seat()
+        self.assertEqual(
+            post.call_args.args, (api_module.API_BASE_URL + "/v5/cmd/creat",)
+        )
+        self.assertEqual(
+            post.call_args.kwargs["json"],
+            {"sn": "SYNTHETIC-SN", "type": "cushion_lock_on"},
+        )
+        self.assertEqual(post.call_args.kwargs["headers"]["token"], "access")
+        self.assertNotIn("data", post.call_args.kwargs)
+
+    def test_settings_partial_update_and_rejection(self):
+        api = api_module.NiuApi("test", "secret", 0)
+        api.token = "access"
+        api.sn = "SYNTHETIC-SN"
+        with patch.object(
+            api_module.requests, "post", return_value=data_response()
+        ) as post:
+            api.set_setting("low_power_mode_value", "1")
+            self.assertEqual(
+                post.call_args.kwargs["json"],
+                {"sn": "SYNTHETIC-SN", "db_cmd_type": "1", "low_power_mode_value": "1"},
+            )
+        with patch.object(
+            api_module.requests, "post", return_value=FakeResponse(200, {"status": 123})
+        ):
+            with self.assertRaises(api_module.NiuResponseError):
+                api.set_setting("charging_limit_value", "80")
+        with self.assertRaises(ValueError):
+            api.set_setting("unknown", "1")
+
+    def test_control_timeout_is_not_retried(self):
+        api = api_module.NiuApi("test", "secret", 0)
+        api.token = "access"
+        with patch.object(api_module.requests, "post", side_effect=Timeout()) as post:
+            with self.assertRaises(api_module.NiuConnectionError):
+                api.open_seat()
+            self.assertEqual(post.call_count, 1)
+
     def setUp(self) -> None:
         api_module.requests.get.reset_mock(return_value=True, side_effect=True)
         api_module.requests.post.reset_mock(return_value=True, side_effect=True)
@@ -376,9 +422,7 @@ class NiuApiTest(unittest.TestCase):
 
     def test_get_vehicles_info_sends_domestic_identifier_for_chinese(self) -> None:
         """A Chinese locale must still be tagged as a domestic client."""
-        self.api = api_module.NiuApi(
-            "user@example.com", "secret", 0, language="zh-CN"
-        )
+        self.api = api_module.NiuApi("user@example.com", "secret", 0, language="zh-CN")
         self.api.sn = "TEST-SN"
         self.set_authenticated()
         api_module.requests.get.return_value = data_response()

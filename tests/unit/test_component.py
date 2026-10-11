@@ -24,6 +24,9 @@ class FakeApi:
         self.calls: list[str] = []
         self.dataTrackInfo = {"data": []}
 
+    def get_settings(self):
+        return {}
+
     def initialize(self) -> None:
         self.calls.append("initialize")
 
@@ -124,9 +127,15 @@ class ComponentTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(second_api.calls, ["initialize", "battery", "track"])
         self.assertEqual(
             hass.config_entries.forwarded,
-            [("sensor", "select", "camera"), ("sensor", "select", "camera")],
+            [
+                ("sensor", "select", "button", "switch", "number", "camera"),
+                ("sensor", "select", "button", "switch", "number", "camera"),
+            ],
         )
-        self.assertEqual(hass.config_entries.unloaded, [("sensor", "select", "camera")])
+        self.assertEqual(
+            hass.config_entries.unloaded,
+            [("sensor", "select", "button", "switch", "number", "camera")],
+        )
         self.assertEqual(
             hass.config_entries.updated,
             [{"unique_id": "TEST-SN", "title": "NIU – MQi"}],
@@ -152,7 +161,10 @@ class ComponentTest(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(await self.component.async_setup_entry(hass, entry))
 
         self.assertEqual(hass.config_entries.updated, [])
-        self.assertEqual(hass.config_entries.forwarded, [("sensor", "select")])
+        self.assertEqual(
+            hass.config_entries.forwarded,
+            [("sensor", "select", "button", "switch", "number")],
+        )
         self.assertEqual(
             hass.data[self.const.DOMAIN][entry.entry_id].api.calls,
             ["initialize", "battery", "track"],

@@ -75,6 +75,11 @@ class DataUpdateCoordinator:
         self.data = await self._async_update_data()
         self.async_update_listeners()
 
+    def async_set_updated_data(self, data):
+        self.data = data
+        self.last_update_success = True
+        self.async_update_listeners()
+
     def async_add_listener(self, listener):
         self.listeners.append(listener)
         return lambda: self.listeners.remove(listener)
@@ -145,6 +150,19 @@ def install_homeassistant_stubs() -> None:
     sensor.SensorEntity = SensorEntity
     select = types.ModuleType("homeassistant.components.select")
     select.SelectEntity = type("SelectEntity", (), {})
+    button = types.ModuleType("homeassistant.components.button")
+    button.ButtonEntity = type("ButtonEntity", (), {})
+    switch = types.ModuleType("homeassistant.components.switch")
+    switch.SwitchEntity = type("SwitchEntity", (), {})
+    number = types.ModuleType("homeassistant.components.number")
+    number.NumberEntity = type("NumberEntity", (), {})
+    number.NumberDeviceClass = types.SimpleNamespace(POWER="power")
+    number.NumberMode = types.SimpleNamespace(BOX="box")
+    const = types.ModuleType("homeassistant.const")
+    const.EntityCategory = types.SimpleNamespace(CONFIG="config")
+    const.UnitOfPower = types.SimpleNamespace(WATT="W")
+    exceptions = types.ModuleType("homeassistant.exceptions")
+    exceptions.HomeAssistantError = type("HomeAssistantError", (Exception,), {})
     storage = types.ModuleType("homeassistant.helpers.storage")
 
     class Store:
@@ -200,6 +218,11 @@ def install_homeassistant_stubs() -> None:
         "homeassistant.components.camera": camera,
         "homeassistant.components.sensor": sensor,
         "homeassistant.components.select": select,
+        "homeassistant.components.button": button,
+        "homeassistant.components.switch": switch,
+        "homeassistant.components.number": number,
+        "homeassistant.const": const,
+        "homeassistant.exceptions": exceptions,
         "homeassistant.helpers.storage": storage,
         "homeassistant.config_entries": config_entries,
         "homeassistant.core": core,
