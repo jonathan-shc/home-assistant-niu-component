@@ -436,37 +436,68 @@ class NiuApi:
             },
         )
 
-    def get_settings(self) -> dict[str, Any]:
-        """Read settings separately from battery/status/history polling."""
-        payload = self.get_info("/v5/scooter/car_machine/align")
+    def _get_control_settings(self, path: str) -> dict[str, Any]:
+        payload = self.get_info(path)
         data = payload.get("data")
         if not isinstance(data, dict):
             raise NiuResponseError("NIU settings have an unexpected format")
         return data
 
-    def set_setting(self, field: str, value: str) -> None:
-        """Send one partial settings update via the cloud transport."""
-        if field not in {
-            "low_power_mode_value",
-            "charging_limit_value",
-            "charge_power_set_value",
-        }:
+    def get_settings(self) -> dict[str, Any]:
+        """Read vehicle settings independently of status/history polling."""
+        return self._get_control_settings("/v5/scooter/car_machine/align")
+
+    def get_sound_settings(self) -> dict[str, Any]:
+        return self._get_control_settings("/v5/scooter/sound/theme")
+
+    def get_auto_off_settings(self) -> dict[str, Any]:
+        return self._get_control_settings("/v5/users_bind/safety/auto_close_setting")
+
+    def set_setting(self, field: str, value: str | int) -> None:
+        """Send only the requested setting to its observed endpoint."""
+        paths = {
+            "low_power_mode_value": "/v5/scooter/car_machine/align",
+            "charging_limit_value": "/v5/scooter/car_machine/align",
+            "charge_power_set_value": "/v5/scooter/car_machine/align",
+            "foc_ebs_level_value": "/v5/scooter/car_machine/align",
+            "tcs_value": "/v5/scooter/car_machine/align",
+            "auto_parking_value": "/v5/scooter/car_machine/align",
+            "cur_sound_volume": "/v5/scooter/sound/theme",
+            "cur_sound_type": "/v5/scooter/sound/theme",
+            "auto_off_value": "/v5/users_bind/safety/auto_close_setting",
+        }
+        if field not in paths:
             raise ValueError("Unsupported NIU setting")
-        self._authenticated_request(
+        payload = self._authenticated_request(
             "POST",
-            "/v5/scooter/car_machine/align",
+            paths[field],
             headers={**self._locale_headers(), "X-No-Encrypt": "1"},
             json={"sn": self.sn, "db_cmd_type": "1", field: value},
         )
+        if payload.get("status") != 0:
+            raise NiuResponseError("NIU did not confirm acceptance of the setting")
 
-    def open_seat(self) -> None:
-        """Request seat release; acceptance does not prove physical opening."""
-        self._authenticated_request(
+    def send_command(self, command: str) -> None:
+        """Cloud request acceptance does not prove physical execution."""
+        if command not in {
+            "cushion_lock_on",
+            "acc_on",
+            "acc_off",
+            "fortification_on",
+            "fortification_off",
+        }:
+            raise ValueError("Unsupported NIU command")
+        payload = self._authenticated_request(
             "POST",
             "/v5/cmd/creat",
             headers={**self._locale_headers(), "X-No-Encrypt": "1"},
-            json={"sn": self.sn, "type": "cushion_lock_on"},
+            json={"sn": self.sn, "type": command},
         )
+        if payload.get("status") != 0:
+            raise NiuResponseError("NIU did not confirm acceptance of the command")
+
+    def open_seat(self) -> None:
+        self.send_command("cushion_lock_on")
 
     def getDataBatA(self, id_field):
         try:

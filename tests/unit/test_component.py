@@ -27,6 +27,9 @@ class FakeApi:
     def get_settings(self):
         return {}
 
+    get_sound_settings = get_settings
+    get_auto_off_settings = get_settings
+
     def initialize(self) -> None:
         self.calls.append("initialize")
 
