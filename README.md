@@ -56,8 +56,8 @@ up to 50 recent records and `trips_truncated` indicates omitted records; the
 selector still offers every downloaded trip retained in local storage.
 
 The full original GPS details remain in Home Assistant's existing
-`.storage/niu_trip_history_<entry_id>` file (up to 500 retained records, including
-initial-sync markers). `route`, `trips`, and the select's `options` are excluded
+`.storage/niu_trip_history_<entry_id>` file. The full archive is retained locally;
+the former 500-record pruning limit is removed. `route`, `trips`, and the select's `options` are excluded
 from Recorder history, so these large lists are available through the **current
 state API**, rather than copied into Recorder for every state change. Recorder
 still stores the short states and scalar metadata.
@@ -70,12 +70,31 @@ if that ride is evicted, selection falls back to the newest saved ride. With no
 saved rides the route sensors are unknown, the count is zero and the selector
 has no options. Locally stored routes remain available during cloud outages.
 
-The coordinator now polls the track-list endpoint even for entries which only
-selected battery sensors, and processes at most one missing trip per polling
-cycle before updating entities. The newest missing route is downloaded first, then historical rides from the
-50 most recent trips requested from NIU. Old initial-sync skip markers become
-eligible for download, so upgrading fills the history automatically. Already
-downloaded routes are preserved and never requested again. Existing retry
-backoff is retained. NIU may return fewer than 50 rides or no GPS data for an
-older ride; this does not remove previously stored routes. Retention keeps the
-500 newest rides by ride time, rather than download time.
+The coordinator polls ordinary scooter data every 150 seconds. While history
+work remains, it runs a separate history step every 30 seconds without polling
+battery/vehicle endpoints more often. Each step reads at most one older metadata
+page of 50 rides and downloads at most one GPS route. NIU's first-page array and
+older-page `data.items` envelopes are both supported. Discovery stops only at an
+empty page; duplicate pages or malformed responses pause with an error instead
+of falsely declaring completion. New rides take priority over older routes.
+
+The metadata index, next page, downloaded routes and retry deadlines are stored
+locally, so a restart resumes the queue. The complete index is rescanned daily
+to catch rides missed during an extended offline period. Downloaded GPS routes
+are never fetched again. Existing initial-sync skip markers become eligible for
+download on upgrade. Once the queue is processed, polling returns to 150 seconds.
+
+NIU exposes the GPS detail endpoint for one ride at a time; no GPS bulk endpoint
+is used. All routes are fetched sequentially. A server rate limit pauses history
+requests for at least the returned Retry-After duration. Transport/authentication
+errors pause history for five minutes without classifying routes as unavailable.
+If a successful response has no GPS data, it is checked up to three times with
+five- and ten-minute retry delays, then retained as metadata with `gps_unavailable`
+in local storage. Such records do not inflate the GPS trip count or selector.
+
+Trip History exposes scalar progress alongside its bounded recent-route index:
+`discovered_trips`, `pending_trips`, `unavailable_gps_trips`,
+`history_scan_complete`, `next_history_page`, `sync_status` and `sync_error`.
+`sync_status` is `discovering`, `downloading`, `waiting`, `complete`, or
+`complete_with_missing_gps`. Its state and `total_trips` still count downloaded
+GPS rides; the selector offers every downloaded route in the full local archive.

@@ -48,6 +48,8 @@ sys.modules["custom_components.niu"] = niu_package
 api_module = types.ModuleType("custom_components.niu.api")
 api_module.NiuApi = type("NiuApi", (), {})
 api_module.NiuApiError = type("NiuApiError", (Exception,), {})
+api_module.NiuRateLimitError = type("NiuRateLimitError", (api_module.NiuApiError,), {})
+api_module.NiuResponseError = type("NiuResponseError", (api_module.NiuApiError,), {})
 sys.modules["custom_components.niu.api"] = api_module
 
 spec = importlib.util.spec_from_file_location(
@@ -73,6 +75,9 @@ class FakeApi:
     def __init__(self):
         self.calls = []
         self.dataTrackInfo = {"data": []}
+
+    def get_track_page(self, page):
+        return []
 
     def get_track_detail(self, track_id, date):
         self.calls.append(track_id)

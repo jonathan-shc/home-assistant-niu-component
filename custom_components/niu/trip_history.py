@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import math
@@ -11,13 +12,14 @@ from typing import Any
 
 from homeassistant.helpers.storage import Store
 
-from .api import NiuApi, NiuApiError
+from .api import NiuApi, NiuApiError, NiuRateLimitError, NiuResponseError
 
 _LOGGER = logging.getLogger(__name__)
 
 STORAGE_VERSION = 1
-MAX_SAVED_TRIPS = 500
 MAX_RETRY_DELAY = 3600
+MAX_GPS_ATTEMPTS = 3
+HISTORY_SCAN_INTERVAL = 86400
 
 
 class NiuTripHistory:
@@ -25,6 +27,7 @@ class NiuTripHistory:
 
     def __init__(self, hass, entry_id: str):
         self.hass = hass
+        self._save_lock = asyncio.Lock()
         self.store = Store(
             hass,
             STORAGE_VERSION,
@@ -33,6 +36,13 @@ class NiuTripHistory:
         self.trips: dict[str, dict[str, Any]] = {}
         self.attempts: dict[str, int] = {}
         self.retry_after: dict[str, float] = {}
+        self.summaries: dict[str, dict[str, Any]] = {}
+        self.next_history_page = 2
+        self.history_scan_complete = False
+        self.last_page_ids: list[str] = []
+        self.last_history_scan = 0.0
+        self.request_retry_after = 0.0
+        self.sync_error: str | None = None
         self.selected_trip_id: str | None = None
         self.initialized = False
         self.first_sync_completed = False
@@ -45,6 +55,12 @@ class NiuTripHistory:
             self.trips = saved.get("trips", {})
             self.attempts = saved.get("attempts", {})
             self.retry_after = saved.get("retry_after", {})
+            self.summaries = saved.get("summaries", {})
+            self.next_history_page = saved.get("next_history_page", 2)
+            self.history_scan_complete = saved.get("history_scan_complete", False)
+            self.last_page_ids = saved.get("last_page_ids", [])
+            self.last_history_scan = saved.get("last_history_scan", 0.0)
+            self.request_retry_after = saved.get("request_retry_after", 0.0)
             self.selected_trip_id = saved.get("selected_trip_id")
             self.first_sync_completed = saved.get("first_sync_completed", False)
 
@@ -56,15 +72,22 @@ class NiuTripHistory:
 
     async def async_save(self):
         """Persist trip history."""
-        await self.store.async_save(
-            {
-                "trips": self.trips,
-                "selected_trip_id": self.selected_trip_id,
-                "attempts": self.attempts,
-                "retry_after": self.retry_after,
-                "first_sync_completed": self.first_sync_completed,
-            }
-        )
+        async with self._save_lock:
+            await self.store.async_save(
+                {
+                    "trips": self.trips.copy(),
+                    "selected_trip_id": self.selected_trip_id,
+                    "summaries": self.summaries.copy(),
+                    "next_history_page": self.next_history_page,
+                    "history_scan_complete": self.history_scan_complete,
+                    "last_page_ids": self.last_page_ids,
+                    "last_history_scan": self.last_history_scan,
+                    "request_retry_after": self.request_retry_after,
+                    "attempts": self.attempts.copy(),
+                    "retry_after": self.retry_after.copy(),
+                    "first_sync_completed": self.first_sync_completed,
+                }
+            )
 
     def get_pending_trip(self, track_list: dict) -> dict | None:
         """Find the newest missing route, including legacy initial-sync markers."""
@@ -106,10 +129,12 @@ class NiuTripHistory:
             timestamp = trip.get("startTime")
 
             if timestamp:
-                date = datetime.fromtimestamp(
-                    int(timestamp) / 1000,
-                    tz=timezone.utc,
-                ).strftime("%Y%m%d")
+                try:
+                    date = datetime.fromtimestamp(
+                        int(timestamp) / 1000, tz=timezone.utc
+                    ).strftime("%Y%m%d")
+                except (OSError, TypeError, ValueError, OverflowError):
+                    return None
 
         if not date:
             _LOGGER.warning(
@@ -120,13 +145,9 @@ class NiuTripHistory:
 
         try:
             result = api.get_track_detail(track_id, str(date))
-        except NiuApiError as err:
-            _LOGGER.warning(
-                "Could not download NIU trip %s: %s",
-                track_id,
-                err,
-            )
-            return None
+        except NiuApiError:
+            # Authentication, transport and rate-limit errors are not absent GPS.
+            raise
 
         data = result.get("data")
 
@@ -150,67 +171,124 @@ class NiuTripHistory:
             "downloaded_at": datetime.now(timezone.utc).isoformat(),
         }
 
-    async def async_process(self, api: NiuApi):
-        """Download at most one missing trip per coordinator update."""
-        if not self.initialized:
-            return
+    def merge_summaries(self, items: list[dict[str, Any]]) -> None:
+        """Retain the full metadata index, deduplicated by trip ID."""
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            value = item.get("trackId")
+            track_id = str(value) if value is not None else ""
+            if track_id and len(track_id) <= 255:
+                self.summaries[track_id] = item
 
-        if not self.first_sync_completed:
-            track_list = api.dataTrackInfo or {}
-            items = track_list.get("data", [])
-
-            if not isinstance(items, list) or not items:
-                return
-
-            # Historical routes stay eligible; download one per poll, newest first.
-            self.first_sync_completed = True
-            await self.async_save()
-
-        trip = self.get_pending_trip(api.dataTrackInfo)
-
-        if trip is None:
-            return
-
-        track_id = str(trip["trackId"])
-
-        result = await self.hass.async_add_executor_job(
-            self.download_trip,
-            api,
-            trip,
+    def pending_summaries(self) -> list[dict[str, Any]]:
+        """Keep new rides ahead of historical downloads and retries."""
+        pending = []
+        for track_id, summary in self.summaries.items():
+            saved = self.trips.get(track_id)
+            if saved and not saved.get("skipped_initial_sync"):
+                continue
+            pending.append(summary)
+        return sorted(
+            pending,
+            key=lambda item: _trip_sort_key(
+                {
+                    "track_id": str(item["trackId"]),
+                    "summary": item,
+                    "date": item.get("date", ""),
+                }
+            ),
+            reverse=True,
         )
 
+    @property
+    def has_work(self) -> bool:
+        """Use the faster history interval only while work remains."""
+        return not self.history_scan_complete or bool(self.pending_summaries())
+
+    async def async_process(self, api: NiuApi, *, discover: bool = True):
+        """Read at most one older metadata page and one GPS route per step."""
+        if not self.initialized or time.time() < self.request_retry_after:
+            return
+        if (
+            self.history_scan_complete
+            and time.time() - self.last_history_scan >= HISTORY_SCAN_INTERVAL
+        ):
+            self.history_scan_complete = False
+            self.next_history_page = 2
+            self.last_page_ids = []
+        try:
+            await self._async_process(api, discover=discover)
+            self.sync_error = None
+        except NiuApiError as err:
+            # Pause all history requests together; retain the cursor and GPS queue.
+            delay = err.retry_after if isinstance(err, NiuRateLimitError) else 300
+            self.request_retry_after = time.time() + max(30, delay or 300)
+            self.sync_error = str(err)[:255]
+            await self.async_save()
+            _LOGGER.warning("NIU history sync paused: %s", err)
+
+    async def _async_process(self, api: NiuApi, *, discover: bool):
+        items = (api.dataTrackInfo or {}).get("data")
+        if not isinstance(items, list):
+            return
+        self.merge_summaries(items)
+        self.first_sync_completed = True
+
+        if discover and not self.history_scan_complete:
+            if not items and not self.summaries:
+                self.history_scan_complete = True
+                self.last_history_scan = time.time()
+            else:
+                older = await self.hass.async_add_executor_job(
+                    api.get_track_page, self.next_history_page
+                )
+                ids = [str(item.get("trackId", "")) for item in older]
+                if older and (
+                    set(ids) == set(self.last_page_ids)
+                    or set(ids) == {str(item.get("trackId", "")) for item in items}
+                ):
+                    raise NiuResponseError("NIU history pagination did not advance")
+                if not older:
+                    self.history_scan_complete = True
+                    self.last_history_scan = time.time()
+                else:
+                    self.merge_summaries(older)
+                    self.last_page_ids = ids
+                    self.next_history_page += 1
+                # Persist discovery separately so an interrupted GPS fetch loses no page.
+                await self.async_save()
+
+        candidates = self.pending_summaries()
+        pending = self.get_pending_trip({"data": candidates})
+        if pending is None:
+            await self.async_save()
+            return
+        track_id = str(pending["trackId"])
+        result = await self.hass.async_add_executor_job(
+            self.download_trip, api, pending
+        )
         if result is None:
             attempts = self.attempts.get(track_id, 0) + 1
             self.attempts[track_id] = attempts
-
-            delay = min(
-                300 * (2 ** min(attempts - 1, 10)),
-                MAX_RETRY_DELAY,
-            )
-            self.retry_after[track_id] = time.time() + delay
-
-            await self.async_save()
-            return
-
-        self.trips[track_id] = result
-        self.attempts.pop(track_id, None)
-        self.retry_after.pop(track_id, None)
-
-        if len(self.trips) > MAX_SAVED_TRIPS:
-            oldest = sorted(
-                self.trips,
-                key=lambda key: _trip_sort_key(self.trips[key]),
-            )
-            for old_id in oldest[:-MAX_SAVED_TRIPS]:
-                del self.trips[old_id]
-
+            if attempts >= MAX_GPS_ATTEMPTS:
+                self.trips[track_id] = {
+                    "track_id": track_id,
+                    "summary": pending,
+                    "date": pending.get("date"),
+                    "gps_unavailable": True,
+                }
+                self.retry_after.pop(track_id, None)
+            else:
+                self.retry_after[track_id] = time.time() + min(
+                    300 * 2 ** (attempts - 1), MAX_RETRY_DELAY
+                )
+        else:
+            self.trips[track_id] = result
+            self.attempts.pop(track_id, None)
+            self.retry_after.pop(track_id, None)
+        # The user's full archive is retained; live entity payloads remain bounded.
         await self.async_save()
-
-        _LOGGER.info(
-            "Saved NIU trip %s with %s GPS points",
-            track_id,
-            len(result["detail"]["trackItems"]),
-        )
 
     def saved_trips(self) -> list[dict[str, Any]]:
         """Return downloaded trips, newest ride first (exclude sync markers)."""
@@ -359,7 +437,33 @@ def trip_route_attributes(trip: dict[str, Any] | None) -> dict[str, Any]:
 def trip_history_attributes(history: NiuTripHistory) -> dict[str, Any]:
     """Return a bounded recent-trip index with no GPS coordinates."""
     saved = history.saved_trips()
-    attributes = {"trips": [], "total_trips": len(saved), "trips_truncated": False}
+    unavailable = sum(
+        bool(trip.get("gps_unavailable")) for trip in history.trips.values()
+    )
+    attributes = {
+        "trips": [],
+        "total_trips": len(saved),
+        "trips_truncated": False,
+        "discovered_trips": len(history.summaries),
+        "pending_trips": len(history.pending_summaries()),
+        "unavailable_gps_trips": unavailable,
+        "history_scan_complete": history.history_scan_complete,
+        "next_history_page": history.next_history_page,
+        "sync_status": (
+            "waiting"
+            if time.time() < history.request_retry_after
+            else (
+                "discovering"
+                if not history.history_scan_complete
+                else (
+                    "downloading"
+                    if history.pending_summaries()
+                    else ("complete_with_missing_gps" if unavailable else "complete")
+                )
+            )
+        ),
+        "sync_error": history.sync_error,
+    }
     for trip in saved[:MAX_HISTORY_TRIPS]:
         metadata = trip_metadata(trip)
         attributes["trips"].append(metadata)

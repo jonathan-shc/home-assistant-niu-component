@@ -27,6 +27,7 @@ class BackfillTest(unittest.IsolatedAsyncioTestCase):
         self.history.initialized = True
         self.api = types.SimpleNamespace(
             dataTrackInfo={"data": [summary("new", 2000), summary("old", 1000)]},
+            get_track_page=Mock(return_value=[]),
             get_track_detail=Mock(
                 return_value={"data": {"trackItems": [{"lat": 52, "lng": 5}]}}
             ),
@@ -93,13 +94,14 @@ class BackfillTest(unittest.IsolatedAsyncioTestCase):
         await self.history.async_process(self.api)
         await self.history.async_process(self.api)
         self.api.dataTrackInfo["data"].append(summary("oldest", 500))
-        with patch.object(self.module, "MAX_SAVED_TRIPS", 2):
-            await self.history.async_process(self.api)
+        await self.history.async_process(self.api)
         self.assertEqual(
-            [trip["track_id"] for trip in self.history.saved_trips()], ["new", "old"]
+            [trip["track_id"] for trip in self.history.saved_trips()],
+            ["new", "old", "oldest"],
         )
 
     async def test_empty_cloud_list_preserves_saved_history(self):
+        self.api.dataTrackInfo["data"] = self.api.dataTrackInfo["data"][:1]
         await self.history.async_process(self.api)
         self.api.dataTrackInfo = {"data": []}
         await self.history.async_process(self.api)
