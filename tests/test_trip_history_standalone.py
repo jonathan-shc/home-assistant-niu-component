@@ -33,9 +33,7 @@ class FakeStore:
 storage_module.Store = FakeStore
 
 sys.modules["homeassistant"] = types.ModuleType("homeassistant")
-sys.modules["homeassistant.helpers"] = types.ModuleType(
-    "homeassistant.helpers"
-)
+sys.modules["homeassistant.helpers"] = types.ModuleType("homeassistant.helpers")
 sys.modules["homeassistant.helpers.storage"] = storage_module
 
 # Load the actual module without importing the full HA integration.
@@ -123,15 +121,14 @@ async def run_tests():
         await history.async_process(api)
 
         assert api.calls == ["newest"], api.calls
-        assert "older1" in history.trips
-        assert history.trips["older1"]["skipped_initial_sync"]
+        assert "older1" not in history.trips
         print("✓ Test 1: Initial sync downloads only newest trip")
 
         # Test 2: No duplicate downloads.
         await history.async_process(api)
 
-        assert api.calls == ["newest"], api.calls
-        print("✓ Test 2: No duplicate downloads")
+        assert api.calls == ["newest", "older1"], api.calls
+        print("✓ Test 2: Historical trip is downloaded without redownloading newest")
 
         # Test 3: New trip detection.
         api.dataTrackInfo["data"].insert(
@@ -141,7 +138,7 @@ async def run_tests():
 
         await history.async_process(api)
 
-        assert api.calls == ["newest", "new_trip"], api.calls
+        assert api.calls == ["newest", "older1", "new_trip"], api.calls
         assert "new_trip" in history.trips
         print("✓ Test 3: New trips are downloaded")
 
@@ -154,8 +151,9 @@ async def run_tests():
         assert "older1" in restarted.trips
 
         await restarted.async_process(api)
-
-        assert api.calls == ["newest", "new_trip"], api.calls
+        assert api.calls == ["newest", "older1", "new_trip", "older2"], api.calls
+        await restarted.async_process(api)
+        assert api.calls == ["newest", "older1", "new_trip", "older2"], api.calls
         print("✓ Test 4: Trips survive restart without redownload")
 
         print("\nAll four tests passed!")
