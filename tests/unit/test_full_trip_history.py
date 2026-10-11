@@ -52,29 +52,29 @@ class FullHistoryTest(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(ValueError):
             api.get_track_page(0)
 
-    async def test_full_567_ride_archive_is_discovered_and_downloaded_without_eviction(
+    async def test_full_600_ride_archive_is_discovered_and_downloaded_without_eviction(
         self,
     ):
-        rides = [summary(str(i), i) for i in range(567, 0, -1)]
+        rides = [summary(str(i), i) for i in range(600, 0, -1)]
         self.api.dataTrackInfo = {"data": rides[:50]}
         self.api.get_track_page.side_effect = lambda page: rides[
             (page - 1) * 50 : page * 50
         ]
-        for _ in range(567):
+        for _ in range(600):
             await self.history.async_process(self.api)
         self.assertTrue(self.history.history_scan_complete)
-        self.assertEqual(len(self.history.summaries), 567)
-        self.assertEqual(len(self.history.saved_trips()), 567)
-        self.assertEqual(self.api.get_track_detail.call_count, 567)
+        self.assertEqual(len(self.history.summaries), 600)
+        self.assertEqual(len(self.history.saved_trips()), 600)
+        self.assertEqual(self.api.get_track_detail.call_count, 600)
         self.assertEqual(
             [call.args[0] for call in self.api.get_track_page.call_args_list],
             list(range(2, 14)),
         )
         self.assertFalse(self.history.has_work)
         await self.history.async_process(self.api)
-        self.assertEqual(self.api.get_track_detail.call_count, 567)
+        self.assertEqual(self.api.get_track_detail.call_count, 600)
         attributes = self.module.trip_history_attributes(self.history)
-        self.assertEqual(attributes["discovered_trips"], 567)
+        self.assertEqual(attributes["discovered_trips"], 600)
         self.assertEqual(attributes["pending_trips"], 0)
         self.assertEqual(attributes["sync_status"], "complete")
         self.assertLessEqual(
