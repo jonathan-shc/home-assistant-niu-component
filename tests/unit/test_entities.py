@@ -137,6 +137,38 @@ class EntityTest(unittest.IsolatedAsyncioTestCase):
         self.assertIsInstance(sensor_a._attr_device_info["model"], str)
         self.assertEqual(sensor_a._attr_device_info, sensor_b._attr_device_info)
 
+    def test_connection_exposes_provider_measurement_times_without_polling(self):
+        """Arrival calculations must distinguish stale GPS from fresh status."""
+        sensor = self.sensor_module.NiuSensor(
+            self.coordinator,
+            "ScooterConnected",
+            "scooter_connected",
+            "",
+            "isConnected",
+            self.const.SENSOR_TYPE_MOTO,
+            "connectivity",
+            "mdi:motorbike-electric",
+        )
+        payload = {
+            "gpsTimestamp": 1791708102980,
+            "infoTimestamp": 1791729886749,
+            "isAccOn": 1,
+            "nowSpeed": 12,
+        }
+        self.api.getDataMoto = Mock(side_effect=payload.get)
+        attributes = sensor.extra_state_attributes
+        self.assertEqual(attributes["gps_timestamp_ms"], payload["gpsTimestamp"])
+        self.assertEqual(attributes["info_timestamp_ms"], payload["infoTimestamp"])
+        self.assertEqual(attributes["is_acc_on"], 1)
+        self.assertEqual(attributes["current_speed"], 12)
+        self.api.updateMoto.assert_not_called()
+
+        self.api.getDataMoto = Mock(return_value=None)
+        attributes = sensor.extra_state_attributes
+        self.assertIsNone(attributes["gps_timestamp_ms"])
+        self.assertIsNone(attributes["info_timestamp_ms"])
+        self.assertIsNone(attributes["is_acc_on"])
+
     async def test_legacy_battery_entities_keep_names_and_unique_ids(self) -> None:
         """Reloading an old config entry must restore its original entities."""
         entry = types.SimpleNamespace(

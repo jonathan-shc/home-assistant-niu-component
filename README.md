@@ -101,6 +101,14 @@ GPS rides; the selector offers every downloaded route in the full local archive.
 
 ## Raw riding mode
 
+The connection sensor also exposes `gps_timestamp_ms`, `info_timestamp_ms`,
+`is_acc_on` and `current_speed` from the same cached vehicle response as its
+coordinates. Timestamps are NIU Unix milliseconds, not the time Home Assistant
+polled the API. GPS may be older than status; missing fields remain null. Use
+the GPS timestamp for position age and the info timestamp for speed/ACC age.
+Cloud measurements and reachability estimates do not establish current motion
+or travel direction. These attributes add no API requests.
+
 The **RidingMode** sensor exposes the provider's `cycling_model` value unchanged.
 It is added automatically to existing entries and uses the normal shared status
 polling, without extra API calls. The numeric codes have not been mapped to

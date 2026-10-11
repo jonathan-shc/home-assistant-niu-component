@@ -114,6 +114,11 @@ class NiuSensor(NiuCoordinatorEntity, SensorEntity):
             "bmsId_a": self._api.getDataBatA("bmsId"),
             "latitude": self._api.getDataPos("lat"),
             "longitude": self._api.getDataPos("lng"),
+            # Provider measurement times (Unix milliseconds), not HA poll times.
+            "gps_timestamp_ms": self._api.getDataMoto("gpsTimestamp"),
+            "info_timestamp_ms": self._api.getDataMoto("infoTimestamp"),
+            "is_acc_on": self._api.getDataMoto("isAccOn"),
+            "current_speed": self._api.getDataMoto("nowSpeed"),
             "gsm": self._api.getDataMoto("gsm"),
             "gps": self._api.getDataMoto("gps"),
             "time": self._api.getDataDist("time"),
