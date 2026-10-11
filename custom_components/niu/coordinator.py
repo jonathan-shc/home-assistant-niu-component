@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from datetime import timedelta
+from time import monotonic
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
@@ -26,6 +27,7 @@ from .trip_history import NiuTripHistory
 _LOGGER = logging.getLogger(__name__)
 
 POLL_INTERVAL = timedelta(seconds=150)
+HISTORY_INTERVAL = timedelta(seconds=30)
 DEFAULT_RATE_LIMIT_BACKOFF = 300
 MIN_RATE_LIMIT_BACKOFF = 30
 MAX_RATE_LIMIT_BACKOFF = 3600
@@ -61,6 +63,7 @@ class NiuDataUpdateCoordinator(DataUpdateCoordinator[NiuApi]):
         self.sensor_groups = frozenset(sensor_groups)
         self._initialized = False
         self._skip_trip_history = False
+        self._next_api_poll = 0.0
 
     def _sync_update_data(self) -> NiuApi:
         """Initialize once, then update each required endpoint exactly once."""
@@ -68,6 +71,10 @@ class NiuDataUpdateCoordinator(DataUpdateCoordinator[NiuApi]):
             _LOGGER.debug("Initializing shared NIU API client")
             self.api.initialize()
             self._initialized = True
+
+        now = monotonic()
+        if self.trip_history is not None and now < self._next_api_poll:
+            return self.api
 
         _LOGGER.debug(
             "Updating NIU data groups: %s", ", ".join(sorted(self.sensor_groups))
@@ -92,6 +99,7 @@ class NiuDataUpdateCoordinator(DataUpdateCoordinator[NiuApi]):
             except NiuApiError as err:
                 self._skip_trip_history = True
                 _LOGGER.warning("NIU trip list update failed: %s", err)
+        self._next_api_poll = now + POLL_INTERVAL.total_seconds()
         return self.api
 
     async def _async_update_data(self) -> NiuApi:
@@ -118,4 +126,8 @@ class NiuDataUpdateCoordinator(DataUpdateCoordinator[NiuApi]):
             except Exception:
                 # GPS/history failures must not take existing battery entities offline.
                 _LOGGER.exception("NIU trip history update failed")
+        if self.trip_history is not None:
+            self.update_interval = (
+                HISTORY_INTERVAL if self.trip_history.has_work else POLL_INTERVAL
+            )
         return data

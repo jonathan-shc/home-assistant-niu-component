@@ -188,7 +188,9 @@ class NiuApi:
                 timeout=REQUEST_TIMEOUT,
             )
         except requests.exceptions.RequestException as err:
-            raise NiuConnectionError("Could not reach NIU authentication service") from err
+            raise NiuConnectionError(
+                "Could not reach NIU authentication service"
+            ) from err
 
         payload = self._parse_response(response, authentication_request=True)
         try:
@@ -253,7 +255,9 @@ class NiuApi:
                     self.refresh_access_token()
                     return
                 except NiuApiError as err:
-                    _LOGGER.warning("NIU token refresh failed; logging in again: %s", err)
+                    _LOGGER.warning(
+                        "NIU token refresh failed; logging in again: %s", err
+                    )
 
             self._password_login()
 
@@ -317,9 +321,7 @@ class NiuApi:
             raise NiuRateLimitError(self._parse_retry_after(response))
         if status_code >= 500:
             raise NiuServerError(status_code)
-        if status_code in (401, 403) or (
-            authentication_request and status_code == 400
-        ):
+        if status_code in (401, 403) or (authentication_request and status_code == 400):
             raise NiuAuthenticationError(
                 f"NIU rejected authentication with HTTP {status_code}"
             )
@@ -356,9 +358,7 @@ class NiuApi:
         }
 
     def get_vehicles_info(self, path):
-        return self._authenticated_request(
-            "GET", path, headers=self._locale_headers()
-        )
+        return self._authenticated_request("GET", path, headers=self._locale_headers())
 
     def get_info(
         self,
@@ -378,7 +378,7 @@ class NiuApi:
             "POST", path, headers=headers, data={"sn": self.sn}
         )
 
-    def post_info_track(self, path):
+    def post_info_track(self, path, *, page: int = 0):
         is_chinese = self.language.startswith("zh")
         client_id = "Domestic" if is_chinese else "Overseas"
         headers = {
@@ -389,9 +389,22 @@ class NiuApi:
             "POST",
             path,
             headers=headers,
-            json={"index": "0", "pagesize": 50, "sn": self.sn},
+            json={"index": str(page), "pagesize": 50, "sn": self.sn},
         )
 
+    def get_track_page(self, page: int) -> list[dict[str, Any]]:
+        """Read one history page; NIU uses an envelope on older pages."""
+        if page < 1:
+            raise ValueError("NIU history pages start at 1")
+        result = self.post_info_track(TRACK_LIST_API_URI, page=page)
+        items = result.get("data")
+        if isinstance(items, dict):
+            items = items.get("items")
+        if not isinstance(items, list) or any(
+            not isinstance(item, dict) or not item.get("trackId") for item in items
+        ):
+            raise NiuResponseError("NIU trip history page has an unexpected format")
+        return items
 
     def get_track_detail(self, track_id: str, date: str) -> dict[str, Any]:
         """Retrieve GPS points for a completed NIU trip."""
