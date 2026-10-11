@@ -10,7 +10,9 @@ from .controls import NiuControlEntity, finite_number
 
 async def async_setup_entry(hass, entry, async_add_entities):
     coordinator = hass.data[DOMAIN]["_control_coordinators"][entry.entry_id]
-    async_add_entities([NiuChargingPowerNumber(coordinator)])
+    async_add_entities(
+        [NiuChargingPowerNumber(coordinator), NiuVolumeNumber(coordinator)]
+    )
 
 
 class NiuChargingPowerNumber(NiuControlEntity, NumberEntity):
@@ -65,3 +67,34 @@ class NiuChargingPowerNumber(NiuControlEntity, NumberEntity):
         await self.coordinator.async_set_setting(
             "charge_power_set_value", str(int(number))
         )
+
+
+class NiuVolumeNumber(NiuControlEntity, NumberEntity):
+    """Horn/alert sound level, using the provider's maximum."""
+
+    _attr_icon = "mdi:volume-high"
+    _attr_entity_category = EntityCategory.CONFIG
+    _attr_native_min_value = 0
+    _attr_native_step = 1
+    _attr_mode = NumberMode.BOX
+
+    def __init__(self, coordinator):
+        super().__init__(
+            coordinator, "volume", "Volume", "number", "sup_sound_volume_max"
+        )
+
+    @property
+    def native_value(self):
+        return finite_number(
+            (self.coordinator.data or {}).get("_sound", {}).get("cur_sound_volume")
+        )
+
+    @property
+    def native_max_value(self):
+        return self.coordinator.volume_max() or 0
+
+    async def async_set_native_value(self, value):
+        number = finite_number(value)
+        if number is None or not number.is_integer():
+            raise HomeAssistantError("Volume must be a whole number")
+        await self.coordinator.async_set_setting("cur_sound_volume", str(int(number)))

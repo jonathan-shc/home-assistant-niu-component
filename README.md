@@ -110,7 +110,7 @@ not send commands or represent individual handlebar button presses.
 
 ## Cloud controls
 
-Existing entries gain four controls on the existing NIU device without changing
+Existing entries gain these controls on the existing NIU device without changing
 sensor IDs, credentials or stored trip history:
 
 | Name | Entity | Behavior |
@@ -119,17 +119,31 @@ sensor IDs, credentials or stored trip history:
 | Auto Sleep | switch | Reads/writes `low_power_mode_value`; this is the Auto Sleep setting, not current sleep or low-battery E-Save status |
 | Charging Limit | select | Charge ceiling: 80%, 85%, 90%, 95% or 100% |
 | Charging Power | number | Whole watts within the scooter's reported `charge_power_range` |
+| Regenerative Braking | select | Uit (0), Niveau 3, Standaard (5), Niveau 7, Sterk (10) |
+| Traction Control | switch | TCS on/off |
+| Auto Hold | switch | `auto_parking_value` on/off, using the app's Auto Hold meaning |
+| Auto-Off | select | Provider-reported durations (5/10/30 minutes, 1/8 hours on supported vehicles) |
+| Volume | number | Whole sound levels from 0 to the reported `sup_sound_volume_max` |
+| Sound Theme | select | Provider-reported themes, e.g. Standard / Techno / Gaming |
+| Wake / Power Off | buttons | ACC electronics on/off; do not represent motor motion |
+| Arm Alarm / Disarm Alarm | buttons | Anti-theft fortification commands; do not represent a mechanical lock |
 
-Settings use a separate coordinator with a 150-second poll interval. Settings
+Vehicle settings, sound settings and Auto-Off use a separate coordinator with a
+150-second poll interval. Each source has its own availability state. Settings
 failures do not interrupt existing battery/status sensors or GPS backfill.
 Unsupported settings are unavailable; a subsequent successful poll recovers
 availability. Charging Power remains unavailable when NIU omits valid limits
-(e.g. while unplugged). Its `reported_setting_w` attribute still exposes the
-reported value. No charger/model-specific minimum or maximum is guessed.
+(e.g. while unplugged). When available, its `reported_setting_w` attribute exposes the
+reported value; HA omits extra attributes while the entity is unavailable. No charger/model-specific minimum or maximum is guessed.
 
 Each settings write sends only the selected field plus `sn` and cloud transport
-`db_cmd_type: "1"` to `/v5/scooter/car_machine/align`, then reads provider settings
-back. Entities never assume the requested value was applied; cloud propagation
+`db_cmd_type: "1"`, then reads provider settings back. Vehicle fields use
+`/v5/scooter/car_machine/align`; Volume and Sound Theme use
+`/v5/scooter/sound/theme`; Auto-Off uses
+`/v5/users_bind/safety/auto_close_setting`. Auto-Off sends `auto_off_value` as
+integer seconds and reads `auto_off_time_value`; its choices come from the
+provider's `list`. The observed app requests send the other setting values as
+strings. Do not substitute `auto_off_duration` from the align response. Entities never assume the requested value was applied; cloud propagation
 may take until a later poll. API failures are reported by the action. No commands
 are sent during setup, polling or restart. Requests that time out are not retried.
 
@@ -139,3 +153,15 @@ It requests opening, rather than claiming the seat's physical state. The app
 also queries `/v5/motor/cmdstatus`; its response semantics have not yet been
 verified, so this integration does not treat a button press as proof of opening.
 Compatibility depends on the scooter, firmware and cloud connection.
+
+Regenerative Braking uses `foc_ebs_level_value` and `sup_foc_ebs_level`, rather
+than guessing the meaning of the separate energy-recovery fields. The precise
+app names for levels 3 and 7 have not been established, so the select uses neutral
+numeric labels. Auto Hold uses `sup_auto_parking`; TCS uses `sup_tcs`.
+
+The additional command buttons use `/v5/cmd/creat` with `acc_on`, `acc_off`,
+`fortification_on` and `fortification_off`. These command names and the sound
+write fields are also implemented by the
+[NeariX integration](https://github.com/NeariX67/home-assistant-niu-component).
+They are explicit requests, without optimistic lock/power state. Physical
+execution and compatibility have not been automatically tested on every model.

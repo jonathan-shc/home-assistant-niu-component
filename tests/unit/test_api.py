@@ -151,6 +151,54 @@ class NiuApiTest(unittest.TestCase):
                 api.open_seat()
             self.assertEqual(post.call_count, 1)
 
+    def test_additional_settings_use_correct_endpoints_and_types(self):
+        api = api_module.NiuApi("test", "secret", 0)
+        api.token = "access"
+        api.sn = "SYNTHETIC-SN"
+        cases = (
+            ("foc_ebs_level_value", "5", "/v5/scooter/car_machine/align"),
+            ("tcs_value", "0", "/v5/scooter/car_machine/align"),
+            ("auto_parking_value", "1", "/v5/scooter/car_machine/align"),
+            ("cur_sound_volume", "7", "/v5/scooter/sound/theme"),
+            ("cur_sound_type", "2", "/v5/scooter/sound/theme"),
+            ("auto_off_value", 600, "/v5/users_bind/safety/auto_close_setting"),
+        )
+        with patch.object(
+            api_module.requests, "post", return_value=data_response()
+        ) as post:
+            for field, value, path in cases:
+                api.set_setting(field, value)
+                self.assertEqual(post.call_args.args, (api_module.API_BASE_URL + path,))
+                self.assertEqual(
+                    post.call_args.kwargs["json"],
+                    {"sn": "SYNTHETIC-SN", "db_cmd_type": "1", field: value},
+                )
+                self.assertIs(type(post.call_args.kwargs["json"][field]), type(value))
+
+    def test_controls_require_explicit_acceptance(self):
+        api = api_module.NiuApi("test", "secret", 0)
+        api.token = "access"
+        with patch.object(
+            api_module.requests, "post", return_value=FakeResponse(200, {"data": {}})
+        ):
+            with self.assertRaises(api_module.NiuResponseError):
+                api.set_setting("tcs_value", "1")
+            with self.assertRaises(api_module.NiuResponseError):
+                api.send_command("acc_on")
+        with self.assertRaises(ValueError):
+            api.send_command("unknown")
+
+    def test_auto_off_and_sound_getters_validate_data(self):
+        api = api_module.NiuApi("test", "secret", 0)
+        with patch.object(
+            api, "get_info", return_value={"data": {"auto_off_time_value": 300}}
+        ) as get:
+            self.assertEqual(api.get_auto_off_settings(), {"auto_off_time_value": 300})
+            get.assert_called_once_with("/v5/users_bind/safety/auto_close_setting")
+        with patch.object(api, "get_info", return_value={"data": None}):
+            with self.assertRaises(api_module.NiuResponseError):
+                api.get_sound_settings()
+
     def setUp(self) -> None:
         api_module.requests.get.reset_mock(return_value=True, side_effect=True)
         api_module.requests.post.reset_mock(return_value=True, side_effect=True)
