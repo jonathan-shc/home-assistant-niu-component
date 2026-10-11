@@ -155,7 +155,7 @@ class EntityTest(unittest.IsolatedAsyncioTestCase):
         await self.sensor_module.async_setup_entry(hass, entry, async_add_entities)
 
         all_entities = async_add_entities.call_args.args[0]
-        self.assertEqual(len(all_entities), 6)
+        self.assertEqual(len(all_entities), 7)
         entities = all_entities[:2]
         self.assertEqual(
             [entity._attr_name for entity in entities],
@@ -169,6 +169,38 @@ class EntityTest(unittest.IsolatedAsyncioTestCase):
             ],
         )
         self.assertEqual(entities[0].native_value, 81)
+
+    async def test_riding_mode_added_once_without_mutating_config(self) -> None:
+        """Old entries gain a mode sensor; explicit selection does not duplicate it."""
+        for selected in (["BatteryChargeA"], ["BatteryChargeA", "RidingMode"]):
+            with self.subTest(selected=selected):
+                entry = types.SimpleNamespace(
+                    entry_id="entry-1",
+                    data={self.const.CONF_AUTH: {self.const.CONF_SENSORS: selected}},
+                )
+                hass = types.SimpleNamespace(
+                    data={self.const.DOMAIN: {entry.entry_id: self.coordinator}}
+                )
+                add = Mock()
+                await self.sensor_module.async_setup_entry(hass, entry, add)
+                modes = [
+                    entity
+                    for entity in add.call_args.args[0]
+                    if entity._attr_unique_id.endswith("_riding_mode")
+                ]
+                self.assertEqual(len(modes), 1)
+                sensor = modes[0]
+                self.assertEqual(sensor._attr_name, "NIU Scooter MQi RidingMode")
+                self.assertIsNone(sensor._attr_device_class)
+                self.assertIsNone(sensor._attr_native_unit_of_measurement)
+                for raw in ("2", "7", None):
+                    self.api.getDataMoto = Mock(return_value=raw)
+                    self.assertEqual(sensor.native_value, raw)
+                    self.api.getDataMoto.assert_called_with("cycling_model")
+                self.api.updateMoto.assert_not_called()
+                self.assertEqual(
+                    entry.data[self.const.CONF_AUTH][self.const.CONF_SENSORS], selected
+                )
 
     def test_is_charging_keeps_identity_without_power_device_class(self) -> None:
         """A boolean charging state must not claim to be power measured in watts."""

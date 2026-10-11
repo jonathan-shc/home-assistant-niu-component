@@ -85,9 +85,9 @@ class TripEntitiesTest(unittest.IsolatedAsyncioTestCase):
         before = copy.deepcopy(entry.data)
         await self.sensor_module.async_setup_entry(self.hass, entry, add)
         entities = add.call_args.args[0]
-        self.assertEqual(len(entities), 5)
+        self.assertEqual(len(entities), 6)
         self.assertEqual(
-            [entity._attr_unique_id for entity in entities[1:]],
+            [entity._attr_unique_id for entity in entities[2:]],
             [
                 "sensor.niu_scooter_SN-1_last_trip",
                 "sensor.niu_scooter_SN-1_trip_history",
@@ -95,7 +95,7 @@ class TripEntitiesTest(unittest.IsolatedAsyncioTestCase):
                 "sensor.niu_scooter_SN-1_selected_trip",
             ],
         )
-        self.assertEqual(entities[1]._attr_name, "NIU Scooter MQi Last Trip")
+        self.assertEqual(entities[2]._attr_name, "NIU Scooter MQi Last Trip")
         await self.select_module.async_setup_entry(self.hass, entry, add)
         selector = add.call_args.args[0][0]
         self.assertEqual(selector._attr_unique_id, "select.niu_scooter_SN-1_trip")

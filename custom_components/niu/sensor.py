@@ -25,7 +25,10 @@ from .trip_history import trip_history_attributes, trip_route_attributes
 async def async_setup_entry(hass, entry, async_add_entities) -> None:
     """Set up NIU sensors from a config entry."""
     coordinator: NiuDataUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]
-    sensors_selected = entry.data[CONF_AUTH][CONF_SENSORS]
+    # Add the raw riding-mode code to existing entries without changing their config.
+    sensors_selected = list(entry.data[CONF_AUTH][CONF_SENSORS])
+    if "RidingMode" not in sensors_selected:
+        sensors_selected.append("RidingMode")
 
     entities = []
     for sensor in sensors_selected:

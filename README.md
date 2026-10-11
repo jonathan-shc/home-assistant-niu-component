@@ -98,3 +98,12 @@ Trip History exposes scalar progress alongside its bounded recent-route index:
 `sync_status` is `discovering`, `downloading`, `waiting`, `complete`, or
 `complete_with_missing_gps`. Its state and `total_trips` still count downloaded
 GPS rides; the selector offers every downloaded route in the full local archive.
+
+## Raw riding mode
+
+The **RidingMode** sensor exposes the provider's `cycling_model` value unchanged.
+It is added automatically to existing entries and uses the normal shared status
+polling, without extra API calls. The numeric codes have not been mapped to
+E-Save, Wet, Dynamic, Sports or Master: verify them against your own scooter.
+A missing field is reported as unknown. This sensor reads cloud status; it does
+not send commands or represent individual handlebar button presses.
