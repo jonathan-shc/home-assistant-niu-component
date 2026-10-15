@@ -20,6 +20,10 @@ STORAGE_VERSION = 1
 MAX_RETRY_DELAY = 3600
 MAX_GPS_ATTEMPTS = 3
 HISTORY_SCAN_INTERVAL = 86400
+# NIU lists a ride while it is still under way, under its final track ID, and
+# its summary keeps growing until the ride ends. Wait this long after the
+# last reported end before fetching the route, and fetch again if it grew.
+RIDE_SETTLE_SECONDS = 300
 
 
 class NiuTripHistory:
@@ -108,8 +112,7 @@ class NiuTripHistory:
             if not track_id:
                 continue
 
-            saved = self.trips.get(track_id)
-            if saved is not None and not saved.get("skipped_initial_sync"):
+            if not self._needs_download(track_id, trip):
                 continue
 
             if time.time() < self.retry_after.get(track_id, 0):
@@ -185,10 +188,8 @@ class NiuTripHistory:
         """Keep new rides ahead of historical downloads and retries."""
         pending = []
         for track_id, summary in self.summaries.items():
-            saved = self.trips.get(track_id)
-            if saved and not saved.get("skipped_initial_sync"):
-                continue
-            pending.append(summary)
+            if self._needs_download(track_id, summary):
+                pending.append(summary)
         return sorted(
             pending,
             key=lambda item: _trip_sort_key(
@@ -200,6 +201,15 @@ class NiuTripHistory:
             ),
             reverse=True,
         )
+
+    def _needs_download(self, track_id: str, summary: dict[str, Any]) -> bool:
+        """A ride without a route, or whose route was fetched while under way."""
+        if _still_riding(summary):
+            return False
+        saved = self.trips.get(track_id)
+        if not saved or saved.get("skipped_initial_sync"):
+            return True
+        return _grew(saved.get("summary"), summary)
 
     @property
     def has_work(self) -> bool:
@@ -271,7 +281,13 @@ class NiuTripHistory:
         if result is None:
             attempts = self.attempts.get(track_id, 0) + 1
             self.attempts[track_id] = attempts
-            if attempts >= MAX_GPS_ATTEMPTS:
+            saved = self.trips.get(track_id)
+            if attempts >= MAX_GPS_ATTEMPTS and saved and saved.get("detail"):
+                # Keep the partial route rather than losing it; stop retrying.
+                saved["summary"] = pending
+                self.attempts.pop(track_id, None)
+                self.retry_after.pop(track_id, None)
+            elif attempts >= MAX_GPS_ATTEMPTS:
                 self.trips[track_id] = {
                     "track_id": track_id,
                     "summary": pending,
@@ -325,6 +341,24 @@ class NiuTripHistory:
         except Exception:
             self.selected_trip_id = previous
             raise
+
+
+def _still_riding(summary: dict[str, Any]) -> bool:
+    """The ride ended so recently that NIU may still be extending it."""
+    end = _finite_number(summary.get("endTime"))
+    return end is not None and time.time() * 1000 - end < RIDE_SETTLE_SECONDS * 1000
+
+
+def _grew(saved: Any, latest: dict[str, Any]) -> bool:
+    """NIU now reports the ride as longer than when its route was fetched."""
+    if not isinstance(saved, dict):
+        return False
+    for field in ("endTime", "distance", "ridingtime"):
+        before = _finite_number(saved.get(field))
+        after = _finite_number(latest.get(field))
+        if before is not None and after is not None and after > before:
+            return True
+    return False
 
 
 def _trip_sort_key(trip: dict[str, Any]) -> tuple[float, str]:
