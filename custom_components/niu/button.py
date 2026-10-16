@@ -12,6 +12,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
     coordinator = hass.data[DOMAIN][entry.entry_id]
     async_add_entities(
         [
+            NiuRefreshStatusButton(coordinator),
             NiuOpenSeatButton(coordinator),
             NiuCommandButton(coordinator, "wake", "Wake", "acc_on", "mdi:power"),
             NiuCommandButton(
@@ -33,6 +34,20 @@ async def async_setup_entry(hass, entry, async_add_entities):
             ),
         ]
     )
+
+
+class NiuRefreshStatusButton(NiuCoordinatorEntity, ButtonEntity):
+    """Explicit read-only motor-status request, independent of history polling."""
+
+    _attr_icon = "mdi:refresh"
+
+    def __init__(self, coordinator):
+        super().__init__(coordinator)
+        self._attr_unique_id = f"button.niu_scooter_{coordinator.api.sn}_refresh_status"
+        self._attr_name = f"NIU Scooter {coordinator.api.sensor_prefix} Refresh Status"
+
+    async def async_press(self):
+        await self.coordinator.async_refresh_status()
 
 
 class NiuOpenSeatButton(NiuCoordinatorEntity, ButtonEntity):
