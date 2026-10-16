@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import timedelta
-from time import monotonic
+from time import monotonic, time
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .api import NiuApi, NiuApiError, NiuRateLimitError
@@ -64,6 +66,34 @@ class NiuDataUpdateCoordinator(DataUpdateCoordinator[NiuApi]):
         self._initialized = False
         self._skip_trip_history = False
         self._next_api_poll = 0.0
+        self._api_update_lock = asyncio.Lock()
+        self._api_retry_at = 0.0
+        self.status_checked_at = 0.0
+
+    def _rate_limit_delay(self, err: NiuRateLimitError) -> float:
+        """Share provider backoff between scheduled and explicit requests."""
+        delay = max(
+            MIN_RATE_LIMIT_BACKOFF,
+            min(err.retry_after or DEFAULT_RATE_LIMIT_BACKOFF, MAX_RATE_LIMIT_BACKOFF),
+        )
+        self._api_retry_at = monotonic() + delay
+        return delay
+
+    async def async_refresh_status(self) -> None:
+        """Read motor status now, bypassing only the normal polling interval."""
+        async with self._api_update_lock:
+            if monotonic() < self._api_retry_at:
+                raise HomeAssistantError("NIU status refresh blocked by API backoff")
+            try:
+                await self.hass.async_add_executor_job(self.api.updateMoto)
+            except NiuRateLimitError as err:
+                self._rate_limit_delay(err)
+                raise HomeAssistantError("NIU status refresh rate limited") from err
+            except NiuApiError as err:
+                raise HomeAssistantError(f"NIU status refresh failed: {err}") from err
+            # A successful request is distinct from the provider measurement time.
+            self.status_checked_at = time()
+            self.async_set_updated_data(self.api)
 
     def _sync_update_data(self) -> NiuApi:
         """Initialize once, then update each required endpoint exactly once."""
@@ -105,18 +135,20 @@ class NiuDataUpdateCoordinator(DataUpdateCoordinator[NiuApi]):
     async def _async_update_data(self) -> NiuApi:
         """Fetch NIU data without blocking Home Assistant's event loop."""
         try:
-            data = await self.hass.async_add_executor_job(self._sync_update_data)
+            async with self._api_update_lock:
+                remaining = self._api_retry_at - monotonic()
+                if remaining > 0:
+                    raise UpdateFailed("NIU API backoff active", retry_after=remaining)
+                data = await self.hass.async_add_executor_job(self._sync_update_data)
         except NiuRateLimitError as err:
-            retry_after = err.retry_after or DEFAULT_RATE_LIMIT_BACKOFF
-            retry_after = max(
-                MIN_RATE_LIMIT_BACKOFF,
-                min(retry_after, MAX_RATE_LIMIT_BACKOFF),
-            )
+            retry_after = self._rate_limit_delay(err)
             raise UpdateFailed(
                 "NIU API rate limit exceeded", retry_after=retry_after
             ) from err
         except NiuApiError as err:
             raise UpdateFailed(f"NIU API update failed: {err}") from err
+        except UpdateFailed:
+            raise
         except Exception as err:
             raise UpdateFailed("Unexpected error while updating NIU data") from err
 

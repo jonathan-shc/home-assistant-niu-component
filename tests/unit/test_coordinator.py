@@ -6,6 +6,7 @@ import importlib
 from pathlib import Path
 import sys
 import unittest
+from unittest.mock import patch
 
 from tests.unit.ha_stubs import clear_niu_modules, install_homeassistant_stubs
 
@@ -118,6 +119,79 @@ class CoordinatorTest(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertEqual(groups, {self.const.SENSOR_TYPE_BAT})
+
+    async def test_direct_status_bypasses_poll_throttle_and_publishes_only_motor(self):
+        """A lock-time check must reach NIU even just after a regular poll."""
+        api = FakeApi()
+        coordinator = self.coordinator_module.NiuDataUpdateCoordinator(
+            FakeHass(), None, api, {self.const.SENSOR_TYPE_MOTO}, trip_history=object()
+        )
+        coordinator._initialized = True
+        coordinator._next_api_poll = float("inf")
+        published = []
+        coordinator.async_add_listener(lambda: published.append(api.calls.copy()))
+        with patch.object(self.coordinator_module, "time", return_value=12345.0):
+            await coordinator.async_refresh_status()
+        self.assertEqual(api.calls, ["motor"])
+        self.assertEqual(published, [["motor"]])
+        self.assertEqual(coordinator.status_checked_at, 12345.0)
+        self.assertEqual(coordinator._next_api_poll, float("inf"))
+
+    async def test_failed_direct_status_never_publishes_success_marker(self):
+        """An error must not let an automation reuse cached ACC as a fresh read."""
+        api_module = importlib.import_module("custom_components.niu.api")
+        api = FakeApi()
+        coordinator = self.coordinator_module.NiuDataUpdateCoordinator(
+            FakeHass(), None, api, {self.const.SENSOR_TYPE_MOTO}
+        )
+        with patch.object(api, "updateMoto", side_effect=api_module.NiuApiError("offline")):
+            with self.assertRaises(self.coordinator_module.HomeAssistantError):
+                await coordinator.async_refresh_status()
+        self.assertEqual(coordinator.status_checked_at, 0.0)
+        self.assertIsNone(coordinator.data)
+
+    async def test_rate_limit_blocks_both_direct_and_regular_updates(self):
+        """Explicit requests cannot bypass provider Retry-After."""
+        api_module = importlib.import_module("custom_components.niu.api")
+        api = FakeApi()
+        coordinator = self.coordinator_module.NiuDataUpdateCoordinator(
+            FakeHass(), None, api, {self.const.SENSOR_TYPE_MOTO}
+        )
+        with patch.object(api, "updateMoto", side_effect=api_module.NiuRateLimitError(420)) as request:
+            with self.assertRaises(self.coordinator_module.HomeAssistantError):
+                await coordinator.async_refresh_status()
+            with self.assertRaisesRegex(self.coordinator_module.HomeAssistantError, "backoff"):
+                await coordinator.async_refresh_status()
+            with self.assertRaises(self.coordinator_module.UpdateFailed):
+                await coordinator._async_update_data()
+            self.assertEqual(request.call_count, 1)
+        self.assertEqual(coordinator.status_checked_at, 0.0)
+
+    async def test_direct_status_waits_for_scheduled_request(self):
+        """The explicit and scheduled motor writes must not race each other."""
+        import asyncio
+
+        api = FakeApi()
+        coordinator = self.coordinator_module.NiuDataUpdateCoordinator(
+            FakeHass(), None, api, {self.const.SENSOR_TYPE_MOTO}
+        )
+        started, release = asyncio.Event(), asyncio.Event()
+
+        async def executor(target, *args):
+            if target == coordinator._sync_update_data:
+                started.set()
+                await release.wait()
+            return target(*args)
+
+        coordinator.hass.async_add_executor_job = executor
+        scheduled = asyncio.create_task(coordinator._async_update_data())
+        await started.wait()
+        direct = asyncio.create_task(coordinator.async_refresh_status())
+        await asyncio.sleep(0)
+        self.assertEqual(api.calls, [])
+        release.set()
+        await asyncio.gather(scheduled, direct)
+        self.assertEqual(api.calls, ["initialize", "motor", "motor"])
 
 
 if __name__ == "__main__":

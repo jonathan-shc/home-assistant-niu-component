@@ -109,6 +109,16 @@ the GPS timestamp for position age and the info timestamp for speed/ACC age.
 Cloud measurements and reachability estimates do not establish current motion
 or travel direction. These attributes add no API requests.
 
+The **Refresh Status** button explicitly reads only
+`/v5/scooter/motor_data/index_info`, bypassing the normal 150-second polling
+interval. It publishes the returned ACC, speed and position to the existing
+sensors without sending scooter commands or downloading trips. The connection
+sensor's `status_checked_at` attribute is the successful explicit request time
+(Unix seconds); it does not replace NIU's measurement timestamps or guarantee
+that the scooter has supplied a new measurement. Failed requests leave that
+marker unchanged and report an error. Explicit and scheduled reads are
+serialized and respect API rate-limit backoff.
+
 The **RidingMode** sensor exposes the provider's `cycling_model` value unchanged.
 It is added automatically to existing entries and uses the normal shared status
 polling, without extra API calls. The numeric codes have not been mapped to

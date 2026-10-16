@@ -99,6 +99,7 @@ class EntityTest(unittest.IsolatedAsyncioTestCase):
         self.camera_module = importlib.import_module("custom_components.niu.camera")
         self.api = FakeApi()
         self.coordinator = FakeCoordinator(self.api)
+        self.coordinator.status_checked_at = 0.0
         history_module = importlib.import_module("custom_components.niu.trip_history")
         self.coordinator.trip_history = history_module.NiuTripHistory(
             types.SimpleNamespace(), "entry-1"
@@ -161,6 +162,7 @@ class EntityTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(attributes["info_timestamp_ms"], payload["infoTimestamp"])
         self.assertEqual(attributes["is_acc_on"], 1)
         self.assertEqual(attributes["current_speed"], 12)
+        self.assertEqual(attributes["status_checked_at"], 0.0)
         self.api.updateMoto.assert_not_called()
 
         self.api.getDataMoto = Mock(return_value=None)

@@ -182,6 +182,19 @@ class ControlsTest(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(self.module.HomeAssistantError):
             await button.async_press()
 
+    async def test_refresh_button_only_reads_status(self):
+        from unittest.mock import AsyncMock
+
+        main = types.SimpleNamespace(
+            api=self.api, last_update_success=True, async_refresh_status=AsyncMock()
+        )
+        button = self.button.NiuRefreshStatusButton(main)
+        self.assertEqual(button._attr_unique_id, "button.niu_scooter_TEST_refresh_status")
+        await button.async_press()
+        main.async_refresh_status.assert_awaited_once()
+        self.api.send_command.assert_not_called()
+        self.api.open_seat.assert_not_called()
+
     async def test_stable_distinct_entity_ids_on_existing_device(self):
         await self.ready()
         entity = self.switch.NiuAutoSleepSwitch(self.coordinator)

@@ -118,6 +118,7 @@ class NiuSensor(NiuCoordinatorEntity, SensorEntity):
             "gps_timestamp_ms": self._api.getDataMoto("gpsTimestamp"),
             "info_timestamp_ms": self._api.getDataMoto("infoTimestamp"),
             "is_acc_on": self._api.getDataMoto("isAccOn"),
+            "status_checked_at": self.coordinator.status_checked_at,
             "current_speed": self._api.getDataMoto("nowSpeed"),
             "gsm": self._api.getDataMoto("gsm"),
             "gps": self._api.getDataMoto("gps"),
