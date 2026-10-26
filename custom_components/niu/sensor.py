@@ -117,6 +117,7 @@ class NiuSensor(NiuCoordinatorEntity, SensorEntity):
             # Provider measurement times (Unix milliseconds), not HA poll times.
             "gps_timestamp_ms": self._api.getDataMoto("gpsTimestamp"),
             "info_timestamp_ms": self._api.getDataMoto("infoTimestamp"),
+            "status_checked_at": self.coordinator.last_status_refresh_at,
             "is_acc_on": self._api.getDataMoto("isAccOn"),
             "current_speed": self._api.getDataMoto("nowSpeed"),
             "gsm": self._api.getDataMoto("gsm"),
