@@ -13,6 +13,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
     async_add_entities(
         [
             NiuOpenSeatButton(coordinator),
+            NiuRefreshStatusButton(coordinator),
             NiuCommandButton(coordinator, "wake", "Wake", "acc_on", "mdi:power"),
             NiuCommandButton(
                 coordinator, "power_off", "Power Off", "acc_off", "mdi:power-off"
@@ -33,6 +34,23 @@ async def async_setup_entry(hass, entry, async_add_entities):
             ),
         ]
     )
+
+
+class NiuRefreshStatusButton(NiuCoordinatorEntity, ButtonEntity):
+    """Request fresh status data and wait for the coordinator to finish."""
+
+    _attr_icon = "mdi:refresh"
+
+    def __init__(self, coordinator):
+        super().__init__(coordinator)
+        api = coordinator.api
+        self._attr_unique_id = f"button.niu_scooter_{api.sn}_refresh_status"
+        self._attr_name = f"NIU Scooter {api.sensor_prefix} Refresh Status"
+
+    async def async_press(self):
+        await self.coordinator.async_force_refresh()
+        if not self.coordinator.last_update_success:
+            raise HomeAssistantError("NIU status refresh failed")
 
 
 class NiuOpenSeatButton(NiuCoordinatorEntity, ButtonEntity):
