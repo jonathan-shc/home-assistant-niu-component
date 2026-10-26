@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from datetime import timedelta
-from time import monotonic
+from time import monotonic, time
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
@@ -64,6 +64,12 @@ class NiuDataUpdateCoordinator(DataUpdateCoordinator[NiuApi]):
         self._initialized = False
         self._skip_trip_history = False
         self._next_api_poll = 0.0
+        self.last_status_refresh_at = 0.0
+
+    async def async_force_refresh(self) -> None:
+        """Fetch fresh provider data now instead of returning the poll cache."""
+        self._next_api_poll = 0.0
+        await self.async_refresh()
 
     def _sync_update_data(self) -> NiuApi:
         """Initialize once, then update each required endpoint exactly once."""
@@ -119,6 +125,8 @@ class NiuDataUpdateCoordinator(DataUpdateCoordinator[NiuApi]):
             raise UpdateFailed(f"NIU API update failed: {err}") from err
         except Exception as err:
             raise UpdateFailed("Unexpected error while updating NIU data") from err
+
+        self.last_status_refresh_at = time()
 
         if self.trip_history is not None and not self._skip_trip_history:
             try:

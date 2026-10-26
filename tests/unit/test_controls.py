@@ -3,7 +3,7 @@
 import importlib
 import types
 import unittest
-from unittest.mock import Mock
+from unittest.mock import AsyncMock, Mock
 
 from tests.unit.ha_stubs import clear_niu_modules, install_homeassistant_stubs
 
@@ -180,6 +180,25 @@ class ControlsTest(unittest.IsolatedAsyncioTestCase):
         self.api.open_seat.assert_called_once()
         self.api.open_seat.side_effect = self.api_module.NiuResponseError("rejected")
         with self.assertRaises(self.module.HomeAssistantError):
+            await button.async_press()
+
+    async def test_refresh_button_forces_status_update_and_reuses_entity_id(self):
+        main = types.SimpleNamespace(
+            api=self.api,
+            last_update_success=True,
+            async_force_refresh=AsyncMock(),
+        )
+        button = self.button.NiuRefreshStatusButton(main)
+
+        self.assertEqual(
+            button._attr_unique_id,
+            "button.niu_scooter_TEST_refresh_status",
+        )
+        await button.async_press()
+        main.async_force_refresh.assert_awaited_once()
+
+        main.last_update_success = False
+        with self.assertRaisesRegex(self.module.HomeAssistantError, "refresh failed"):
             await button.async_press()
 
     async def test_stable_distinct_entity_ids_on_existing_device(self):

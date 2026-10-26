@@ -58,6 +58,7 @@ class FakeCoordinator:
     def __init__(self, api) -> None:
         self.data = api
         self.last_update_success = True
+        self.last_status_refresh_at = 1791729999.0
 
 
 class FakeResponse:
@@ -159,6 +160,7 @@ class EntityTest(unittest.IsolatedAsyncioTestCase):
         attributes = sensor.extra_state_attributes
         self.assertEqual(attributes["gps_timestamp_ms"], payload["gpsTimestamp"])
         self.assertEqual(attributes["info_timestamp_ms"], payload["infoTimestamp"])
+        self.assertEqual(attributes["status_checked_at"], 1791729999.0)
         self.assertEqual(attributes["is_acc_on"], 1)
         self.assertEqual(attributes["current_speed"], 12)
         self.api.updateMoto.assert_not_called()
