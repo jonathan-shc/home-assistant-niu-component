@@ -6,6 +6,7 @@ import importlib
 from pathlib import Path
 import sys
 import unittest
+from unittest.mock import AsyncMock
 
 from tests.unit.ha_stubs import clear_niu_modules, install_homeassistant_stubs
 
@@ -118,6 +119,28 @@ class CoordinatorTest(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertEqual(groups, {self.const.SENSOR_TYPE_BAT})
+
+    async def test_force_refresh_bypasses_poll_cache(self) -> None:
+        api = FakeApi()
+        coordinator = self.coordinator_module.NiuDataUpdateCoordinator(
+            FakeHass(), None, api, {self.const.SENSOR_TYPE_MOTO}
+        )
+        coordinator._next_api_poll = float("inf")
+        coordinator.async_refresh = AsyncMock()
+
+        await coordinator.async_force_refresh()
+
+        self.assertEqual(coordinator._next_api_poll, 0.0)
+        coordinator.async_refresh.assert_awaited_once()
+
+    async def test_successful_update_records_status_check_time(self) -> None:
+        coordinator = self.coordinator_module.NiuDataUpdateCoordinator(
+            FakeHass(), None, FakeApi(), {self.const.SENSOR_TYPE_MOTO}
+        )
+
+        await coordinator._async_update_data()
+
+        self.assertGreater(coordinator.last_status_refresh_at, 0.0)
 
 
 if __name__ == "__main__":
